@@ -1,0 +1,176 @@
+services:
+  traefik:
+    image: traefik:v3.5.2
+    container_name: traefik
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.le.acme.tlschallenge=true
+      - --certificatesresolvers.le.acme.email=${TRAEFIK_ACME_EMAIL}
+      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
+      - --api.dashboard=true
+      - --api.insecure=false
+      - --log.level=INFO  # Change to INFO for prod, DEBUG is too verbose
+      - --log.format=json  # JSON is better for log aggregation
+      - --ping=true  # Enable ping endpoint for healthcheck
+    env_file:
+      - .env
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_letsencrypt:/letsencrypt
+    networks:
+      - app-network
+    restart: unless-stopped
+    # healthcheck:
+    #   test: ["CMD", "traefik", "healthcheck", "--ping"]
+    #   interval: 10s
+    #   timeout: 5s
+    #   retries: 3
+    #   start_period: 10s
+
+  api:
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY_NAME}:${IMAGE_TAG}
+    container_name: pdf-extractor-backend
+    restart: unless-stopped
+    platform: linux/amd64
+    ports:
+      - "8000:8000"
+    expose:
+      - "8000"
+    env_file:
+      - .env
+    environment:
+      - STAGE=production
+    volumes:
+      - shared_volume:/app/shared_volume
+    networks:
+      - app-network
+    depends_on:
+      postgres:
+        condition: service_healthy  # ✓ Enable this
+      redis:
+        condition: service_healthy  # ✓ Enable this
+    # healthcheck:
+    #   # Runs INSIDE container, so localhost works
+    #   test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 3
+    #   start_period: 40s
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.fastapi-http.rule=Host(`${TRAEFIK_HOST}`) && PathPrefix(`/api`)
+      - traefik.http.routers.fastapi-http.entrypoints=web
+      - traefik.http.routers.fastapi-http.middlewares=fastapi-redirect
+      - traefik.http.middlewares.fastapi-redirect.redirectscheme.scheme=https
+      - traefik.http.routers.fastapi.rule=Host(`${TRAEFIK_HOST}`) && PathPrefix(`/api`)
+      - traefik.http.routers.fastapi.entrypoints=websecure
+      - traefik.http.routers.fastapi.tls.certresolver=le
+      - traefik.http.services.fastapi.loadbalancer.server.port=8000
+      - traefik.http.routers.fastapi.middlewares=fastapi-ratelimit,fastapi-strip-prefix
+      - traefik.http.middlewares.fastapi-ratelimit.ratelimit.average=${TRAEFIK_RATE_LIMIT_AVERAGE:-10}
+      - traefik.http.middlewares.fastapi-ratelimit.ratelimit.burst=${TRAEFIK_RATE_LIMIT_BURST:-20}
+      - traefik.http.middlewares.fastapi-ratelimit.ratelimit.period=${TRAEFIK_RATE_LIMIT_PERIOD:-1s}
+      - traefik.http.middlewares.fastapi-strip-prefix.stripprefix.prefixes=/api
+
+  frontend:
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY_NAME}:${FRONTEND_IMAGE_TAG}
+    container_name: pdf-frontend
+    restart: unless-stopped
+    expose:
+      - "3000"
+    networks:
+      - app-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=app-network"
+      - "traefik.http.routers.frontend.rule=Host(`${TRAEFIK_HOST}`)"
+      - "traefik.http.routers.frontend.entrypoints=websecure"
+      - "traefik.http.routers.frontend.tls.certresolver=le"
+      - "traefik.http.routers.frontend.priority=1"
+      - "traefik.http.services.frontend.loadbalancer.server.port=3000"
+
+  worker:
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY_NAME}:${IMAGE_TAG}
+    container_name: pdf-extractor-worker
+    platform: linux/amd64
+    restart: unless-stopped
+    command: celery -A src.tasks.celery_app worker --loglevel=info
+    networks:
+      - app-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - STAGE=production
+    volumes:
+      - shared_volume:/app/shared_volume
+    healthcheck:
+      # Checks if worker is active and ready
+      test: ["CMD-SHELL", "celery -A src.tasks.celery_app status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: pdf-extraction-db
+    platform: linux/amd64
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-}
+      POSTGRES_DB: ${DB_NAME:-pdf_extraction}
+    expose:
+      - "5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # Runs INSIDE container, checks its own postgres
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-pdf_extraction}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    env_file:
+      - .env
+    networks:
+      - app-network
+
+  redis:
+    image: redis:7-alpine
+    platform: linux/amd64
+    container_name: pdf-extraction-redis
+    expose:
+      - "6379"
+    healthcheck:
+      # Runs INSIDE container
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - app-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  uploads:
+  shared_volume:
+  traefik_letsencrypt:
+
+networks:
+  app-network:
+    driver: bridge

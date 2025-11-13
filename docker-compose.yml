@@ -1,0 +1,133 @@
+services:
+  api:
+    build: ./backend
+    container_name: pdf-extractor-backend
+    platform: linux/amd64
+    ports:
+      - "8000:8000"
+    command: uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - STAGE=${STAGE:-development}
+    networks:
+      - app-network
+    develop:
+      watch:
+        - path: ./backend/src
+          target: /app/src
+          action: sync
+        - path: ./backend/requirements.txt
+          target: /app/requirements.txt
+          action: rebuild
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:8000 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  worker:
+    build: ./backend
+    container_name: pdf-extractor-worker
+    platform: linux/amd64
+    command: celery -A src.tasks.celery_app worker --loglevel=info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - app-network
+    env_file:
+      - .env
+    environment:
+      - STAGE=${STAGE:-development}
+    develop:
+      watch:
+        - path: ./backend/src
+          target: /app/src
+          action: sync
+        - path: ./backend/requirements.txt
+          target: /app/requirements.txt
+          action: rebuild
+    volumes:
+      - ./uploads:/app/uploads
+      - shared_volume:/app/shared_volume
+
+  frontend:
+    build: ./frontend
+    container_name: pdf-frontend
+    platform: linux/amd64
+    ports:
+      - "3000:3000"
+    networks:
+      - app-network
+    develop:
+      watch:
+        - path: ./frontend/src
+          target: /app/src
+          action: sync
+        - path: ./frontend/package.json
+          target: /app/package.json
+          action: rebuild
+    depends_on:
+      - api
+      - worker
+      - redis
+      - postgres
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: pdf-extraction-db
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-}
+      POSTGRES_DB: ${DB_NAME:-pdf_extraction}
+    networks:
+      - app-network
+    expose:
+      - "5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-pdf_extraction}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    env_file:
+      - .env
+
+  redis:
+    image: redis:7-alpine
+    platform: linux/amd64
+    container_name: pdf-extraction-redis
+    networks:
+      - app-network
+    expose:
+      - "6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+
+    
+volumes:
+  postgres_data:
+  redis_data:
+  uploads:
+  shared_volume:
+
+
+networks:
+  app-network:
+    driver: bridge

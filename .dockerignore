@@ -1,0 +1,13 @@
+frontend/node_modules/
+frontend/dist/
+backend/.env.docker
+.env
+.venv
+.python-version
+__pycache__/
+.DS_Store
+.vscode/
+.idea/
+frontend/.env.local
+frontend/.env
+frontend/.next
