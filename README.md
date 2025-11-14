@@ -1,11 +1,11 @@
-# PDF Extraction Tool
+# Extract Workbench Tool
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![Next.js 14](https://img.shields.io/badge/Next.js-14-black)](https://nextjs.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.119-green)](https://fastapi.tiangolo.com/)
 
-A comprehensive, AI-powered document and audio extraction platform that supports multiple extraction engines for PDFs, images, and audio files. Built with FastAPI (backend) and Next.js 14 (frontend), featuring real-time processing, user management, and project organization.
+A comprehensive, AI-powered document and audio extraction platform that supports multiple extraction engines for PDFs, Images, and Audio files. Built with FastAPI (backend) and Next.js 14 (frontend), featuring real-time processing, user management, and project organization.
 
 ## 🎯 Overview
 
@@ -78,25 +78,10 @@ graph TB
     Worker -->|Read Files| Local
 ```
 
-### System Architecture
-
-```mermaid
-graph LR
-    subgraph "User Flow"
-        A[User Uploads File] --> B[Frontend Uploads to API]
-        B --> C[API Creates Extraction Job]
-        C --> D[Job Queued in Redis]
-        D --> E[Celery Worker Picks Up Job]
-        E --> F[Worker Processes File]
-        F --> G[Results Stored in DB]
-        G --> H[Frontend Polls for Results]
-    end
-```
-
 ## 📦 Project Structure
 
 ```
-PDF-Extraction-Tool/
+Extract-Workbench-Tool-Public/
 ├── backend/              # FastAPI backend service
 │   ├── src/             # Source code
 │   │   ├── auth/        # Authentication & authorization
@@ -142,8 +127,8 @@ PDF-Extraction-Tool/
 
 1. **Clone the repository**:
 ```bash
-git clone https://github.com/yourusername/PDF-Extraction-Tool.git
-cd PDF-Extraction-Tool
+git clone chttps://github.com/Tailored-AI-Hub/Extract-Workbench-Tool-Public
+cd Extract-Workbench-Tool-Public
 ```
 
 2. **Create environment file**:
@@ -215,6 +200,7 @@ For detailed setup instructions, see:
 - [Backend README](backend/README.md) - Backend setup and configuration
 - [Frontend README](frontend/README.md) - Frontend setup and development
 - [Development Guide](DEVELOPEMENT.md) - Complete development setup
+- [Deployment Guide](DEPLOYMENT.md) - Complete deployment guide and setup
 
 ## 📦 Extraction Engines
 
